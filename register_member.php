@@ -7,22 +7,57 @@ $sponsor = $_SESSION['username'];
 $error = '';
 $success = '';
 
+// Helper: Bilangin ang kabuuang miyembro sa isang leg
+function countTotalInLeg($conn, $username) {
+    if (empty($username)) return 0;
+    $board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT slot1, slot2 FROM matrix_boards WHERE leader_username = '$username'"));
+    $left = $board['slot1'] ?? '';
+    $right = $board['slot2'] ?? '';
+    $count = 1;
+    $count += countTotalInLeg($conn, $left);
+    $count += countTotalInLeg($conn, $right);
+    return $count;
+}
+
+// Helper: Mag-record ng pairing bonus kung may bagong pair
+function recordPairingBonus($conn, $username) {
+    $board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT slot1, slot2 FROM matrix_boards WHERE leader_username = '$username'"));
+    $left = $board['slot1'] ?? '';
+    $right = $board['slot2'] ?? '';
+    
+    if (empty($left) || empty($right)) return 0;
+    
+    $left_count = countTotalInLeg($conn, $left);
+    $right_count = countTotalInLeg($conn, $right);
+    $current_pairs = min($left_count, $right_count);
+    
+    // Kunin ang existing pairs mula sa cycles table
+    $existing_query = mysqli_query($conn, "SELECT COUNT(*) as total FROM cycles WHERE username = '$username'");
+    $existing_row = mysqli_fetch_assoc($existing_query);
+    $existing_pairs = (int)$existing_row['total'];
+    
+    $new_pairs = $current_pairs - $existing_pairs;
+    
+    for ($i = 0; $i < $new_pairs; $i++) {
+        mysqli_query($conn, "INSERT INTO cycles (username, reward_amount) VALUES ('$username', 500)");
+    }
+    
+    return $new_pairs;
+}
+
 // Function: Hanapin ang pinakamalalim na bakanteng slot sa napiling side
 function findDeepestVacant($conn, $root_user, $target_side, $depth = 0) {
-    if ($depth > 50) return null; // iwas infinite loop
+    if ($depth > 50) return null;
     
-    // Kunin ang board ng root_user
     $board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE leader_username = '$root_user' AND status = 'ACTIVE'"));
     if (!$board) return null;
     
     $slot_name = ($target_side == 'left') ? 'slot1' : 'slot2';
     
-    // Kung bakante ang direktang slot, dito ilagay
     if (empty($board[$slot_name])) {
         return ['user' => $root_user, 'slot' => $slot_name];
     }
     
-    // Kung may laman, tumawag sa taong nandoon
     $downline = $board[$slot_name];
     return findDeepestVacant($conn, $downline, $target_side, $depth + 1);
 }
@@ -30,7 +65,7 @@ function findDeepestVacant($conn, $root_user, $target_side, $depth = 0) {
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $new_user = mysqli_real_escape_string($conn, $_POST['username']);
     $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
-    $position = mysqli_real_escape_string($conn, $_POST['position']); // 'left' or 'right'
+    $position = mysqli_real_escape_string($conn, $_POST['position']);
     
     $check_user = mysqli_query($conn, "SELECT id FROM users WHERE username='$new_user'");
     if (mysqli_num_rows($check_user) > 0) {
@@ -45,6 +80,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         
         if ($placement) {
             mysqli_query($conn, "UPDATE matrix_boards SET {$placement['slot']} = '$new_user' WHERE leader_username = '{$placement['user']}'");
+            
+            // *** IMPORTANTE: Mag-record ng pairing bonus para sa direct sponsor ***
+            $direct_placement_user = $placement['user'];
+            recordPairingBonus($conn, $direct_placement_user);
+            
+            // Kung ang sponsor ay hindi pareho ng direct_placement_user, i-record din para sa kanya
+            if ($sponsor != $direct_placement_user) {
+                recordPairingBonus($conn, $sponsor);
+            }
+            
             $success = "Member $new_user registered successfully under {$placement['user']} ({$position} side)!";
         } else {
             $error = "Cannot find vacant slot. Please try another side.";
