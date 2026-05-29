@@ -7,7 +7,6 @@ $sponsor = $_SESSION['username'];
 $error = '';
 $success = '';
 
-// Helper: cycle board if complete
 function cycleIfComplete($conn, $board_id, $leader_username) {
     $board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE id = $board_id"));
     $filled = 0;
@@ -26,33 +25,53 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
     $reg_code = mysqli_real_escape_string($conn, strtoupper(trim($_POST['code'])));
     
-    // 1. I-validate muna ang code
+    // 1. Validate code
     $code_check = mysqli_query($conn, "SELECT * FROM codes WHERE code = '$reg_code' AND is_used = 0");
     $code_row = mysqli_fetch_assoc($code_check);
     
     if (!$code_row) {
         $error = "Invalid or already used registration code!";
     } else {
-        // 2. Check kung existing na ang username
         $check_user = mysqli_query($conn, "SELECT id FROM users WHERE username='$new_user'");
         if (mysqli_num_rows($check_user) > 0) {
             $error = "Username already exists!";
         } else {
-            // 3. Kunin ang product price (optional, pwedeng gamitin sa future reports)
-            $product_id = $code_row['product_id'];
-            $product_query = mysqli_query($conn, "SELECT price FROM products WHERE id = $product_id");
-            $product = mysqli_fetch_assoc($product_query);
-            
-            // 4. I-mark ang code bilang nagamit na
+            // Mark code as used
             mysqli_query($conn, "UPDATE codes SET is_used = 1, used_by = '$new_user', used_at = NOW() WHERE code = '$reg_code'");
             
-            // 5. I-create ang bagong user
+            // Create new user and his board
             mysqli_query($conn, "INSERT INTO users (username, password, sponsor) VALUES ('$new_user', '$password', '$sponsor')");
             mysqli_query($conn, "INSERT INTO matrix_boards (leader_username, status) VALUES ('$new_user', 'ACTIVE')");
             
-            // 6. Ilagay sa matrix ng sponsor (may spillover logic)
-            // (Dito ilalagay ang existing placement code mo - gamitin mo ang iyong kasalukuyang logic)
-            // Para maging maayos, isama mo rito ang buong placement logic mula sa iyong kasalukuyang register_member.php
+            // ========== PLACEMENT LOGIC ==========
+            $sponsor_board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE leader_username = '$sponsor' AND status = 'ACTIVE'"));
+            
+            if ($sponsor_board) {
+                if (empty($sponsor_board['slot1'])) {
+                    mysqli_query($conn, "UPDATE matrix_boards SET slot1 = '$new_user' WHERE id = {$sponsor_board['id']}");
+                } elseif (empty($sponsor_board['slot2'])) {
+                    mysqli_query($conn, "UPDATE matrix_boards SET slot2 = '$new_user' WHERE id = {$sponsor_board['id']}");
+                } else {
+                    // Try level-2 slots (spillover to upline)
+                    $uplink_board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE (slot1 = '$sponsor' OR slot2 = '$sponsor') AND status = 'ACTIVE'"));
+                    if ($uplink_board) {
+                        $is_slot1 = ($uplink_board['slot1'] == $sponsor);
+                        if ($is_slot1) {
+                            if (empty($uplink_board['slot3'])) mysqli_query($conn, "UPDATE matrix_boards SET slot3 = '$new_user' WHERE id = {$uplink_board['id']}");
+                            elseif (empty($uplink_board['slot4'])) mysqli_query($conn, "UPDATE matrix_boards SET slot4 = '$new_user' WHERE id = {$uplink_board['id']}");
+                        } else {
+                            if (empty($uplink_board['slot5'])) mysqli_query($conn, "UPDATE matrix_boards SET slot5 = '$new_user' WHERE id = {$uplink_board['id']}");
+                            elseif (empty($uplink_board['slot6'])) mysqli_query($conn, "UPDATE matrix_boards SET slot6 = '$new_user' WHERE id = {$uplink_board['id']}");
+                        }
+                    }
+                }
+            }
+            
+            // Check if sponsor's board is now complete
+            $updated_board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE leader_username = '$sponsor' AND status = 'ACTIVE'"));
+            if ($updated_board) {
+                cycleIfComplete($conn, $updated_board['id'], $sponsor);
+            }
             
             $success = "Member $new_user registered successfully with code: $reg_code!";
         }
@@ -67,7 +86,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     <title>Register New Member</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        /* ===== BEAUTIFUL STYLES (same as before) ===== */
         :root {
             --primary: #2563eb;
             --success: #10b981;
