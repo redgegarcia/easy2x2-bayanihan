@@ -181,7 +181,7 @@ $is_l1_complete = (!empty($l1_1) && !empty($l1_2));
             display: flex;
             justify-content: center;
             gap: 100px;
-            padding: 6px 22px;
+            padding: 14px 22px;
         }
         .counter-item {
             text-align: center;
@@ -203,14 +203,14 @@ $is_l1_complete = (!empty($l1_1) && !empty($l1_2));
 
         .pairs-badge {
             text-align: center;
-            font-size: 0.7rem;
+            font-size: 0.9rem;
             font-weight: 600;
             color: #92400e;
             background: #fef3c7;
             display: inline-block;
             width: auto;
             margin: 0 auto 12px;
-            padding: 4px 16px;
+            padding: 8px 16px;
             border-radius: 30px;
         }
 
