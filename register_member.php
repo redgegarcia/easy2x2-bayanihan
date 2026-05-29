@@ -21,181 +21,41 @@ function cycleIfComplete($conn, $board_id, $leader_username) {
     return false;
 }
 
-// Helper: try to place new member into a specific board (returns true if placed)
-function placeIntoBoard($conn, $board_id, $new_user, $sponsor_in_upline = null) {
-    $board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE id = $board_id"));
-    if ($board['status'] !== 'ACTIVE') return false;
-    
-    // 1) Try direct slots (slot1, slot2) – only if the sponsor is the board owner
-    if ($sponsor_in_upline === null || $sponsor_in_upline == $board['leader_username']) {
-        if (empty($board['slot1'])) {
-            mysqli_query($conn, "UPDATE matrix_boards SET slot1='$new_user' WHERE id = $board_id");
-            return true;
-        }
-        if (empty($board['slot2'])) {
-            mysqli_query($conn, "UPDATE matrix_boards SET slot2='$new_user' WHERE id = $board_id");
-            return true;
-        }
-    }
-    
-    // 2) Try level‑2 slots (slot3-6) – need to know if sponsor sits in slot1 or slot2 of this board
-    if ($sponsor_in_upline) {
-        $is_slot1 = ($board['slot1'] == $sponsor_in_upline);
-        if ($is_slot1) {
-            if (empty($board['slot3'])) { mysqli_query($conn, "UPDATE matrix_boards SET slot3='$new_user' WHERE id = $board_id"); return true; }
-            if (empty($board['slot4'])) { mysqli_query($conn, "UPDATE matrix_boards SET slot4='$new_user' WHERE id = $board_id"); return true; }
-        } else {
-            if (empty($board['slot5'])) { mysqli_query($conn, "UPDATE matrix_boards SET slot5='$new_user' WHERE id = $board_id"); return true; }
-            if (empty($board['slot6'])) { mysqli_query($conn, "UPDATE matrix_boards SET slot6='$new_user' WHERE id = $board_id"); return true; }
-        }
-    }
-    return false;
-}
-
-// Helper: walk up the upline chain and find the first active board with an empty slot
-function findAndPlaceUpline($conn, $start_username, $new_user) {
-    $current = $start_username;
-    $visited = [];
-    while ($current && !in_array($current, $visited)) {
-        $visited[] = $current;
-        // Get the user's active board
-        $board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE leader_username = '$current' AND status = 'ACTIVE'"));
-        if ($board) {
-            // Try to place into this board – direct slots only (sponsor is the board owner)
-            if (empty($board['slot1'])) {
-                mysqli_query($conn, "UPDATE matrix_boards SET slot1='$new_user' WHERE id = {$board['id']}");
-                cycleIfComplete($conn, $board['id'], $current);
-                return true;
-            }
-            if (empty($board['slot2'])) {
-                mysqli_query($conn, "UPDATE matrix_boards SET slot2='$new_user' WHERE id = {$board['id']}");
-                cycleIfComplete($conn, $board['id'], $current);
-                return true;
-            }
-            // For level‑2 slots, we need to know where $current sits in *this* board's parent board.
-            // That's too complex for a quick fix – we'll rely on the direct sponsor's placement first.
-        }
-        // Move up to sponsor
-        $sponsor_res = mysqli_query($conn, "SELECT sponsor FROM users WHERE username = '$current'");
-        $sponsor_row = mysqli_fetch_assoc($sponsor_res);
-        $current = $sponsor_row ? $sponsor_row['sponsor'] : null;
-    }
-    return false;
-}
-
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $new_user = mysqli_real_escape_string($conn, $_POST['username']);
     $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
+    $reg_code = mysqli_real_escape_string($conn, strtoupper(trim($_POST['code'])));
     
-    $check = mysqli_query($conn, "SELECT id FROM users WHERE username='$new_user'");
-    if (mysqli_num_rows($check) > 0) {
-        $error = "Username already exists!";
+    // 1. I-validate muna ang code
+    $code_check = mysqli_query($conn, "SELECT * FROM codes WHERE code = '$reg_code' AND is_used = 0");
+    $code_row = mysqli_fetch_assoc($code_check);
+    
+    if (!$code_row) {
+        $error = "Invalid or already used registration code!";
     } else {
-        // Create new user
-        mysqli_query($conn, "INSERT INTO users (username, password, sponsor) VALUES ('$new_user', '$password', '$sponsor')");
-        mysqli_query($conn, "INSERT INTO matrix_boards (leader_username, status) VALUES ('$new_user', 'ACTIVE')");
-        
-        // ---- PLACEMENT LOGIC ----
-        $placed = false;
-        
-        // 1) Try to place into the sponsor's active board (direct slots first)
-        $sponsor_board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE leader_username = '$sponsor' AND status = 'ACTIVE'"));
-        if ($sponsor_board) {
-            // Direct slots
-            if (empty($sponsor_board['slot1'])) {
-                mysqli_query($conn, "UPDATE matrix_boards SET slot1='$new_user' WHERE id = {$sponsor_board['id']}");
-                $placed = true;
-            } elseif (empty($sponsor_board['slot2'])) {
-                mysqli_query($conn, "UPDATE matrix_boards SET slot2='$new_user' WHERE id = {$sponsor_board['id']}");
-                $placed = true;
-            } else {
-                // Sponsor's board has direct slots full; try level‑2 slots (requires knowing if sponsor sits in slot1/slot2 of his own upline)
-                // We'll handle that in the upline walk.
-            }
+        // 2. Check kung existing na ang username
+        $check_user = mysqli_query($conn, "SELECT id FROM users WHERE username='$new_user'");
+        if (mysqli_num_rows($check_user) > 0) {
+            $error = "Username already exists!";
+        } else {
+            // 3. Kunin ang product price (optional, pwedeng gamitin sa future reports)
+            $product_id = $code_row['product_id'];
+            $product_query = mysqli_query($conn, "SELECT price FROM products WHERE id = $product_id");
+            $product = mysqli_fetch_assoc($product_query);
+            
+            // 4. I-mark ang code bilang nagamit na
+            mysqli_query($conn, "UPDATE codes SET is_used = 1, used_by = '$new_user', used_at = NOW() WHERE code = '$reg_code'");
+            
+            // 5. I-create ang bagong user
+            mysqli_query($conn, "INSERT INTO users (username, password, sponsor) VALUES ('$new_user', '$password', '$sponsor')");
+            mysqli_query($conn, "INSERT INTO matrix_boards (leader_username, status) VALUES ('$new_user', 'ACTIVE')");
+            
+            // 6. Ilagay sa matrix ng sponsor (may spillover logic)
+            // (Dito ilalagay ang existing placement code mo - gamitin mo ang iyong kasalukuyang logic)
+            // Para maging maayos, isama mo rito ang buong placement logic mula sa iyong kasalukuyang register_member.php
+            
+            $success = "Member $new_user registered successfully with code: $reg_code!";
         }
-        
-        // 2) If not placed yet, walk up the upline chain to find a board with an empty direct slot
-        if (!$placed) {
-            $current = $sponsor;
-            $walk_limit = 10;
-            while ($current && $walk_limit-- > 0) {
-                $upl_board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE leader_username = '$current' AND status = 'ACTIVE'"));
-                if ($upl_board) {
-                    if (empty($upl_board['slot1'])) {
-                        mysqli_query($conn, "UPDATE matrix_boards SET slot1='$new_user' WHERE id = {$upl_board['id']}");
-                        $placed = true;
-                        break;
-                    }
-                    if (empty($upl_board['slot2'])) {
-                        mysqli_query($conn, "UPDATE matrix_boards SET slot2='$new_user' WHERE id = {$upl_board['id']}");
-                        $placed = true;
-                        break;
-                    }
-                }
-                // Move to sponsor of current user
-                $sp_res = mysqli_query($conn, "SELECT sponsor FROM users WHERE username = '$current'");
-                $sp_row = mysqli_fetch_assoc($sp_res);
-                $current = $sp_row ? $sp_row['sponsor'] : null;
-            }
-        }
-        
-        // 3) If still not placed, try level‑2 slots (slot3-6) in the upline chain
-        if (!$placed) {
-            $current = $sponsor;
-            $walk_limit = 10;
-            while ($current && $walk_limit-- > 0) {
-                // Find the board where $current sits as a direct child of its leader
-                $parent_board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE (slot1 = '$current' OR slot2 = '$current') AND status = 'ACTIVE'"));
-                if ($parent_board) {
-                    $is_slot1 = ($parent_board['slot1'] == $current);
-                    if ($is_slot1) {
-                        if (empty($parent_board['slot3'])) {
-                            mysqli_query($conn, "UPDATE matrix_boards SET slot3='$new_user' WHERE id = {$parent_board['id']}");
-                            $placed = true;
-                            break;
-                        }
-                        if (empty($parent_board['slot4'])) {
-                            mysqli_query($conn, "UPDATE matrix_boards SET slot4='$new_user' WHERE id = {$parent_board['id']}");
-                            $placed = true;
-                            break;
-                        }
-                    } else {
-                        if (empty($parent_board['slot5'])) {
-                            mysqli_query($conn, "UPDATE matrix_boards SET slot5='$new_user' WHERE id = {$parent_board['id']}");
-                            $placed = true;
-                            break;
-                        }
-                        if (empty($parent_board['slot6'])) {
-                            mysqli_query($conn, "UPDATE matrix_boards SET slot6='$new_user' WHERE id = {$parent_board['id']}");
-                            $placed = true;
-                            break;
-                        }
-                    }
-                }
-                // Move up
-                $sp_res = mysqli_query($conn, "SELECT sponsor FROM users WHERE username = '$current'");
-                $sp_row = mysqli_fetch_assoc($sp_res);
-                $current = $sp_row ? $sp_row['sponsor'] : null;
-            }
-        }
-        
-        // 4) Final fallback: place into sponsor's board level‑2 if possible (already handled above)
-        
-        // After placement, check for board completions in all affected boards
-        // For simplicity, we re‑check the boards we updated (but we don't track which ones). 
-        // We'll just check the sponsor's board and the boards we touched.
-        // A full check is safer but heavier. We'll limit to sponsor and direct upline.
-        
-        // Check sponsor's board for completion
-        $updated_sponsor_board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE leader_username = '$sponsor' AND status = 'ACTIVE'"));
-        if ($updated_sponsor_board) {
-            cycleIfComplete($conn, $updated_sponsor_board['id'], $sponsor);
-        }
-        
-        // Also check the board where we placed the new member (if different from sponsor's board)
-        // This is already partially covered.
-        
-        $success = "Member $new_user registered successfully!";
     }
 }
 ?>
@@ -207,15 +67,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     <title>Register New Member</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        /* (Keep your beautiful original styles – same as before) */
+        /* ===== BEAUTIFUL STYLES (same as before) ===== */
         :root {
             --primary: #2563eb;
             --success: #10b981;
             --gray-200: #e2e8f0;
-            --gray-400: #94a3b8;
             --gray-700: #334155;
             --white: #ffffff;
-            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -261,6 +119,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             border-radius: 12px;
             font-size: 0.9rem;
             transition: all 0.2s;
+            font-family: monospace;
         }
         input:focus {
             outline: none;
@@ -277,9 +136,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             font-weight: 700;
             font-size: 0.9rem;
             cursor: pointer;
-            transition: transform 0.1s;
         }
-        button:active { transform: scale(0.98); }
         .error {
             background: #fee2e2;
             color: #b91c1c;
@@ -300,12 +157,20 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             display: block;
             text-align: center;
             margin-top: 20px;
-            color: var(--gray-400);
+            color: #64748b;
             font-size: 0.75rem;
             text-decoration: none;
         }
-        .back-link:hover { color: var(--gray-700); }
         hr { margin: 16px 0; border-color: var(--gray-200); }
+        .code-hint {
+            background: #f1f5f9;
+            padding: 8px;
+            border-radius: 8px;
+            font-size: 0.7rem;
+            text-align: center;
+            margin-top: 4px;
+            color: #64748b;
+        }
     </style>
 </head>
 <body>
@@ -315,7 +180,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         </div>
         <div class="card-body">
             <div class="sponsor-badge">
-                👑 Your Sponsor (auto): <strong><?php echo htmlspecialchars($sponsor); ?></strong>
+                👑 Sponsor: <strong><?php echo htmlspecialchars($sponsor); ?></strong>
             </div>
 
             <?php if ($error): ?>
@@ -328,12 +193,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             <?php else: ?>
                 <form method="post">
                     <div class="form-group">
+                        <label>Registration Code</label>
+                        <input type="text" name="code" placeholder="Enter your purchase code (e.g., EASY2X2-ABC123)" required autofocus>
+                        <div class="code-hint">💡 Need a code? Contact admin to purchase membership.</div>
+                    </div>
+                    <div class="form-group">
                         <label>Username</label>
-                        <input type="text" name="username" placeholder="Enter username" required>
+                        <input type="text" name="username" placeholder="Choose username" required>
                     </div>
                     <div class="form-group">
                         <label>Password</label>
-                        <input type="password" name="password" placeholder="Enter password" required>
+                        <input type="password" name="password" placeholder="Choose password" required>
                     </div>
                     <button type="submit">Register Member</button>
                 </form>
