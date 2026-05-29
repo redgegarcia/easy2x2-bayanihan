@@ -179,10 +179,10 @@ $is_l1_complete = (!empty($l1_1) && !empty($l1_2));
         /* COUNTERS - Mas maliit, simple, walang dominanteng box */
         .counters-row {
             display: flex;
-            justify-content: center;
-            gap: 24px;
+            justify-content: space-around;
+            gap: 10px;
             margin: 8px 0 12px;
-            padding: 6px 12px;
+            padding: 6px 22px;
         }
         .counter-item {
             text-align: center;
@@ -300,11 +300,11 @@ $is_l1_complete = (!empty($l1_1) && !empty($l1_2));
             <!-- COUNTERS (maliit, simple, hindi naka-box) -->
             <div class="counters-row">
                 <div class="counter-item left">
-                    <div class="counter-label">LEFT COUNT</div>
+                    <div class="counter-label">L COUNT</div>
                     <div class="counter-number"><?php echo $left_count; ?></div>
                 </div>
                 <div class="counter-item right">
-                    <div class="counter-label">RIGHT COUNT</div>
+                    <div class="counter-label">R COUNT</div>
                     <div class="counter-number"><?php echo $right_count; ?></div>
                 </div>
             </div>
