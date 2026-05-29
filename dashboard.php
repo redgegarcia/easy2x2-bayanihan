@@ -150,7 +150,7 @@ $is_l1_complete = (!empty($l1_1) && !empty($l1_2));
             align-items: center; 
             gap: 16px; 
             width: 100%; 
-            padding: 8px 0 16px;
+            padding: 8px 0 6px;
         }
         .pyramid-row { display: flex; justify-content: center; width: 100%; gap: 16px; }
         .slot-top { width: 140px; height: 95px; }
@@ -179,9 +179,8 @@ $is_l1_complete = (!empty($l1_1) && !empty($l1_2));
         /* COUNTERS - Mas maliit, simple, walang dominanteng box */
         .counters-row {
             display: flex;
-            justify-content: space-around;
-            gap: 10px;
-            margin: 8px 0 12px;
+            justify-content: center;
+            gap: 100px;
             padding: 6px 22px;
         }
         .counter-item {
