@@ -7,117 +7,47 @@ $sponsor = $_SESSION['username'];
 $error = '';
 $success = '';
 
-// Helper: cycle board if complete
-function cycleIfComplete($conn, $board_id, $leader_username) {
-    $board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE id = $board_id"));
-    $filled = 0;
-    foreach(['slot1','slot2','slot3','slot4','slot5','slot6'] as $s) if(!empty($board[$s])) $filled++;
-    if($filled == 6) {
-        mysqli_query($conn, "UPDATE matrix_boards SET status = 'COMPLETED' WHERE id = $board_id");
-        mysqli_query($conn, "INSERT INTO cycles (username, reward_amount) VALUES ('$leader_username', 5500)");
-        mysqli_query($conn, "INSERT INTO matrix_boards (leader_username, status) VALUES ('$leader_username', 'ACTIVE')");
-        return true;
-    }
-    return false;
-}
-
-// Helper: Maghanap ng bakanteng slot pataas (spillover)
-function findAndPlace($conn, $start_username, $new_user, $depth = 0) {
-    // Limitahan para iwas infinite loop
-    if ($depth > 20) return false;
+// Function: Hanapin ang pinakamalalim na bakanteng slot sa napiling side
+function findDeepestVacant($conn, $root_user, $target_side, $depth = 0) {
+    if ($depth > 50) return null; // iwas infinite loop
     
-    // Hanapin ang ACTIVE board ng start_username
-    $board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE leader_username = '$start_username' AND status = 'ACTIVE'"));
-    if (!$board) return false;
+    // Kunin ang board ng root_user
+    $board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE leader_username = '$root_user' AND status = 'ACTIVE'"));
+    if (!$board) return null;
     
-    // 1. Subukan sa direct slots (Slot 1, Slot 2)
-    if (empty($board['slot1'])) {
-        mysqli_query($conn, "UPDATE matrix_boards SET slot1 = '$new_user' WHERE id = {$board['id']}");
-        cycleIfComplete($conn, $board['id'], $start_username);
-        return true;
-    }
-    if (empty($board['slot2'])) {
-        mysqli_query($conn, "UPDATE matrix_boards SET slot2 = '$new_user' WHERE id = {$board['id']}");
-        cycleIfComplete($conn, $board['id'], $start_username);
-        return true;
+    $slot_name = ($target_side == 'left') ? 'slot1' : 'slot2';
+    
+    // Kung bakante ang direktang slot, dito ilagay
+    if (empty($board[$slot_name])) {
+        return ['user' => $root_user, 'slot' => $slot_name];
     }
     
-    // 2. Hanapin kung saan nakaupo si start_username sa board ng kanyang sponsor
-    $parent_board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE (slot1 = '$start_username' OR slot2 = '$start_username') AND status = 'ACTIVE'"));
-    if ($parent_board) {
-        $is_slot1 = ($parent_board['slot1'] == $start_username);
-        if ($is_slot1) {
-            if (empty($parent_board['slot3'])) {
-                mysqli_query($conn, "UPDATE matrix_boards SET slot3 = '$new_user' WHERE id = {$parent_board['id']}");
-                cycleIfComplete($conn, $parent_board['id'], $parent_board['leader_username']);
-                return true;
-            }
-            if (empty($parent_board['slot4'])) {
-                mysqli_query($conn, "UPDATE matrix_boards SET slot4 = '$new_user' WHERE id = {$parent_board['id']}");
-                cycleIfComplete($conn, $parent_board['id'], $parent_board['leader_username']);
-                return true;
-            }
-        } else {
-            if (empty($parent_board['slot5'])) {
-                mysqli_query($conn, "UPDATE matrix_boards SET slot5 = '$new_user' WHERE id = {$parent_board['id']}");
-                cycleIfComplete($conn, $parent_board['id'], $parent_board['leader_username']);
-                return true;
-            }
-            if (empty($parent_board['slot6'])) {
-                mysqli_query($conn, "UPDATE matrix_boards SET slot6 = '$new_user' WHERE id = {$parent_board['id']}");
-                cycleIfComplete($conn, $parent_board['id'], $parent_board['leader_username']);
-                return true;
-            }
-        }
-        // Kung puno na ang parent board, umakyat sa mas mataas
-        $sponsor_of_parent = mysqli_fetch_assoc(mysqli_query($conn, "SELECT sponsor FROM users WHERE username = '{$parent_board['leader_username']}'"));
-        if ($sponsor_of_parent && !empty($sponsor_of_parent['sponsor'])) {
-            return findAndPlace($conn, $sponsor_of_parent['sponsor'], $new_user, $depth + 1);
-        }
-    }
-    
-    return false;
+    // Kung may laman, tumawag sa taong nandoon
+    $downline = $board[$slot_name];
+    return findDeepestVacant($conn, $downline, $target_side, $depth + 1);
 }
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $new_user = mysqli_real_escape_string($conn, $_POST['username']);
     $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
-    $reg_code = mysqli_real_escape_string($conn, strtoupper(trim($_POST['code'])));
+    $position = mysqli_real_escape_string($conn, $_POST['position']); // 'left' or 'right'
     
-    // 1. Validate code
-    $code_check = mysqli_query($conn, "SELECT * FROM codes WHERE code = '$reg_code' AND is_used = 0");
-    $code_row = mysqli_fetch_assoc($code_check);
-    
-    if (!$code_row) {
-        $error = "Invalid or already used registration code!";
+    $check_user = mysqli_query($conn, "SELECT id FROM users WHERE username='$new_user'");
+    if (mysqli_num_rows($check_user) > 0) {
+        $error = "Username already exists!";
     } else {
-        $check_user = mysqli_query($conn, "SELECT id FROM users WHERE username='$new_user'");
-        if (mysqli_num_rows($check_user) > 0) {
-            $error = "Username already exists!";
+        // Create new user and his board
+        mysqli_query($conn, "INSERT INTO users (username, password, sponsor) VALUES ('$new_user', '$password', '$sponsor')");
+        mysqli_query($conn, "INSERT INTO matrix_boards (leader_username, status) VALUES ('$new_user', 'ACTIVE')");
+        
+        // Hanapin kung saan ilalagay (pinakamalalim na bakante)
+        $placement = findDeepestVacant($conn, $sponsor, $position);
+        
+        if ($placement) {
+            mysqli_query($conn, "UPDATE matrix_boards SET {$placement['slot']} = '$new_user' WHERE leader_username = '{$placement['user']}'");
+            $success = "Member $new_user registered successfully under {$placement['user']} ({$position} side)!";
         } else {
-            // Mark code as used
-            mysqli_query($conn, "UPDATE codes SET is_used = 1, used_by = '$new_user', used_at = NOW() WHERE code = '$reg_code'");
-            
-            // Create new user and his board
-            mysqli_query($conn, "INSERT INTO users (username, password, sponsor) VALUES ('$new_user', '$password', '$sponsor')");
-            mysqli_query($conn, "INSERT INTO matrix_boards (leader_username, status) VALUES ('$new_user', 'ACTIVE')");
-            
-            // ========== SPILLOVER PLACEMENT LOGIC ==========
-            $placed = findAndPlace($conn, $sponsor, $new_user);
-            
-            if (!$placed) {
-                // Fallback: kung walang nahanap, ilagay sa mismong sponsor
-                $sponsor_board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE leader_username = '$sponsor' AND status = 'ACTIVE'"));
-                if ($sponsor_board) {
-                    if (empty($sponsor_board['slot1'])) {
-                        mysqli_query($conn, "UPDATE matrix_boards SET slot1 = '$new_user' WHERE id = {$sponsor_board['id']}");
-                    } elseif (empty($sponsor_board['slot2'])) {
-                        mysqli_query($conn, "UPDATE matrix_boards SET slot2 = '$new_user' WHERE id = {$sponsor_board['id']}");
-                    }
-                }
-            }
-            
-            $success = "Member $new_user registered successfully with code: $reg_code!";
+            $error = "Cannot find vacant slot. Please try another side.";
         }
     }
 }
@@ -130,13 +60,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     <title>Register New Member</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        :root {
-            --primary: #2563eb;
-            --success: #10b981;
-            --gray-200: #e2e8f0;
-            --gray-700: #334155;
-            --white: #ffffff;
-        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
@@ -150,15 +73,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         .card {
             max-width: 400px;
             width: 100%;
-            background: var(--white);
-            border-radius: 24px;
+            background: white;
+            border-radius: 32px;
             box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
             overflow: hidden;
         }
         .card-header {
             background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
-            padding: 20px;
+            padding: 24px;
             color: white;
+            text-align: center;
         }
         .card-header h2 { font-size: 1.3rem; font-weight: 700; }
         .card-body { padding: 24px; }
@@ -173,24 +97,44 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             color: #92400e;
         }
         .form-group { margin-bottom: 16px; }
-        label { display: block; font-size: 0.8rem; font-weight: 600; color: var(--gray-700); margin-bottom: 4px; }
-        input {
+        label { display: block; font-size: 0.75rem; font-weight: 700; color: #334155; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+        input, select {
             width: 100%;
-            padding: 12px;
-            border: 1px solid var(--gray-200);
-            border-radius: 12px;
+            padding: 14px;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 14px;
             font-size: 0.9rem;
-            transition: all 0.2s;
-            font-family: monospace;
+            font-family: 'Inter', sans-serif;
+            background: #f8fafc;
         }
-        input:focus {
+        input:focus, select:focus {
             outline: none;
-            border-color: var(--primary);
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+            border-color: #2563eb;
+            background: white;
+        }
+        .side-options {
+            display: flex;
+            gap: 12px;
+        }
+        .side-option {
+            flex: 1;
+            text-align: center;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .side-option.selected {
+            border-color: #2563eb;
+            background: #eff6ff;
+        }
+        .side-option input {
+            display: none;
         }
         button {
             width: 100%;
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            background: linear-gradient(135deg, #10b981, #059669);
             color: white;
             border: none;
             padding: 14px;
@@ -198,6 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             font-weight: 700;
             font-size: 0.9rem;
             cursor: pointer;
+            margin-top: 8px;
         }
         .error {
             background: #fee2e2;
@@ -223,17 +168,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             font-size: 0.75rem;
             text-decoration: none;
         }
-        hr { margin: 16px 0; border-color: var(--gray-200); }
-        .code-hint {
-            background: #f1f5f9;
-            padding: 8px;
-            border-radius: 8px;
-            font-size: 0.7rem;
-            text-align: center;
-            margin-top: 4px;
-            color: #64748b;
-        }
+        hr { margin: 16px 0; border-color: #e2e8f0; }
     </style>
+    <script>
+        function selectSide(side) {
+            document.getElementById('position').value = side;
+            document.querySelectorAll('.side-option').forEach(opt => opt.classList.remove('selected'));
+            document.querySelector(`.side-option.${side}`).classList.add('selected');
+        }
+    </script>
 </head>
 <body>
     <div class="card">
@@ -255,17 +198,28 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             <?php else: ?>
                 <form method="post">
                     <div class="form-group">
-                        <label>Registration Code</label>
-                        <input type="text" name="code" placeholder="Enter your purchase code (e.g., EASY2X2-ABC123)" required autofocus>
-                        <div class="code-hint">💡 Need a code? Contact admin to purchase membership.</div>
-                    </div>
-                    <div class="form-group">
                         <label>Username</label>
                         <input type="text" name="username" placeholder="Choose username" required>
                     </div>
                     <div class="form-group">
                         <label>Password</label>
                         <input type="password" name="password" placeholder="Choose password" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Placement Side</label>
+                        <input type="hidden" name="position" id="position" value="left">
+                        <div class="side-options">
+                            <div class="side-option left selected" onclick="selectSide('left')">
+                                <div style="font-size:1.5rem;">⬅️</div>
+                                <div style="font-weight:700;">LEFT</div>
+                                <div style="font-size:0.65rem; color:#64748b;">Slot 1</div>
+                            </div>
+                            <div class="side-option right" onclick="selectSide('right')">
+                                <div style="font-size:1.5rem;">➡️</div>
+                                <div style="font-weight:700;">RIGHT</div>
+                                <div style="font-size:0.65rem; color:#64748b;">Slot 2</div>
+                            </div>
+                        </div>
                     </div>
                     <button type="submit">Register Member</button>
                 </form>
