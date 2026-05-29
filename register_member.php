@@ -31,7 +31,6 @@ function recordPairingBonus($conn, $username) {
     $right_count = countTotalInLeg($conn, $right);
     $current_pairs = min($left_count, $right_count);
     
-    // Kunin ang existing pairs mula sa cycles table
     $existing_query = mysqli_query($conn, "SELECT COUNT(*) as total FROM cycles WHERE username = '$username'");
     $existing_row = mysqli_fetch_assoc($existing_query);
     $existing_pairs = (int)$existing_row['total'];
@@ -64,35 +63,49 @@ function findDeepestVacant($conn, $root_user, $target_side, $depth = 0) {
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $new_user = mysqli_real_escape_string($conn, $_POST['username']);
-    $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
+    $email = mysqli_real_escape_string($conn, $_POST['email']);
     $position = mysqli_real_escape_string($conn, $_POST['position']);
+    $reg_code = mysqli_real_escape_string($conn, strtoupper(trim($_POST['code'])));
     
-    $check_user = mysqli_query($conn, "SELECT id FROM users WHERE username='$new_user'");
-    if (mysqli_num_rows($check_user) > 0) {
-        $error = "Username already exists!";
+    // ===== CODE VALIDATION =====
+    $code_check = mysqli_query($conn, "SELECT * FROM codes WHERE code = '$reg_code' AND is_used = 0");
+    $code_row = mysqli_fetch_assoc($code_check);
+    
+    if (!$code_row) {
+        $error = "Invalid or already used registration code! Please purchase a valid code.";
     } else {
-        // Create new user and his board
-        mysqli_query($conn, "INSERT INTO users (username, password, sponsor) VALUES ('$new_user', '$password', '$sponsor')");
-        mysqli_query($conn, "INSERT INTO matrix_boards (leader_username, status) VALUES ('$new_user', 'ACTIVE')");
-        
-        // Hanapin kung saan ilalagay (pinakamalalim na bakante)
-        $placement = findDeepestVacant($conn, $sponsor, $position);
-        
-        if ($placement) {
-            mysqli_query($conn, "UPDATE matrix_boards SET {$placement['slot']} = '$new_user' WHERE leader_username = '{$placement['user']}'");
-            
-            // *** IMPORTANTE: Mag-record ng pairing bonus para sa direct sponsor ***
-            $direct_placement_user = $placement['user'];
-            recordPairingBonus($conn, $direct_placement_user);
-            
-            // Kung ang sponsor ay hindi pareho ng direct_placement_user, i-record din para sa kanya
-            if ($sponsor != $direct_placement_user) {
-                recordPairingBonus($conn, $sponsor);
-            }
-            
-            $success = "Member $new_user registered successfully under {$placement['user']} ({$position} side)!";
+        // Check kung existing na ang username o email
+        $check_user = mysqli_query($conn, "SELECT id FROM users WHERE username = '$new_user' OR email = '$email'");
+        if (mysqli_num_rows($check_user) > 0) {
+            $error = "Username or email already exists!";
         } else {
-            $error = "Cannot find vacant slot. Please try another side.";
+            // Mark code as used
+            mysqli_query($conn, "UPDATE codes SET is_used = 1, used_by = '$new_user', used_at = NOW() WHERE code = '$reg_code'");
+            
+            // ===== ITO ANG HINIHINGI MO - INSERT STATEMENT =====
+            mysqli_query($conn, "INSERT INTO users (username, email, sponsor) VALUES ('$new_user', '$email', '$sponsor')");
+            
+            // Create new user's matrix board
+            mysqli_query($conn, "INSERT INTO matrix_boards (leader_username, status) VALUES ('$new_user', 'ACTIVE')");
+            
+            // Hanapin kung saan ilalagay
+            $placement = findDeepestVacant($conn, $sponsor, $position);
+            
+            if ($placement) {
+                mysqli_query($conn, "UPDATE matrix_boards SET {$placement['slot']} = '$new_user' WHERE leader_username = '{$placement['user']}'");
+                
+                // Mag-record ng pairing bonus
+                $direct_placement_user = $placement['user'];
+                recordPairingBonus($conn, $direct_placement_user);
+                
+                if ($sponsor != $direct_placement_user) {
+                    recordPairingBonus($conn, $sponsor);
+                }
+                
+                $success = "Member $new_user registered successfully under {$placement['user']} ({$position} side)!";
+            } else {
+                $error = "Cannot find vacant slot. Please try another side.";
+            }
         }
     }
 }
@@ -213,6 +226,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             font-size: 0.75rem;
             text-decoration: none;
         }
+        .code-hint {
+            background: #f1f5f9;
+            padding: 8px;
+            border-radius: 8px;
+            font-size: 0.65rem;
+            text-align: center;
+            margin-top: 6px;
+            color: #64748b;
+        }
         hr { margin: 16px 0; border-color: #e2e8f0; }
     </style>
     <script>
@@ -243,12 +265,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             <?php else: ?>
                 <form method="post">
                     <div class="form-group">
+                        <label>Registration Code</label>
+                        <input type="text" name="code" placeholder="Enter your purchase code" required autofocus>
+                        <div class="code-hint">💡 Need a code? Contact admin to purchase membership (₱2,500 with product).</div>
+                    </div>
+                    <div class="form-group">
                         <label>Username</label>
                         <input type="text" name="username" placeholder="Choose username" required>
                     </div>
                     <div class="form-group">
-                        <label>Password</label>
-                        <input type="password" name="password" placeholder="Choose password" required>
+                        <label>Email Address</label>
+                        <input type="email" name="email" placeholder="active@email.com" required>
                     </div>
                     <div class="form-group">
                         <label>Placement Side</label>
