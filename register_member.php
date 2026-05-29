@@ -7,6 +7,7 @@ $sponsor = $_SESSION['username'];
 $error = '';
 $success = '';
 
+// Helper: cycle board if complete
 function cycleIfComplete($conn, $board_id, $leader_username) {
     $board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE id = $board_id"));
     $filled = 0;
@@ -17,6 +18,64 @@ function cycleIfComplete($conn, $board_id, $leader_username) {
         mysqli_query($conn, "INSERT INTO matrix_boards (leader_username, status) VALUES ('$leader_username', 'ACTIVE')");
         return true;
     }
+    return false;
+}
+
+// Helper: Maghanap ng bakanteng slot pataas (spillover)
+function findAndPlace($conn, $start_username, $new_user, $depth = 0) {
+    // Limitahan para iwas infinite loop
+    if ($depth > 20) return false;
+    
+    // Hanapin ang ACTIVE board ng start_username
+    $board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE leader_username = '$start_username' AND status = 'ACTIVE'"));
+    if (!$board) return false;
+    
+    // 1. Subukan sa direct slots (Slot 1, Slot 2)
+    if (empty($board['slot1'])) {
+        mysqli_query($conn, "UPDATE matrix_boards SET slot1 = '$new_user' WHERE id = {$board['id']}");
+        cycleIfComplete($conn, $board['id'], $start_username);
+        return true;
+    }
+    if (empty($board['slot2'])) {
+        mysqli_query($conn, "UPDATE matrix_boards SET slot2 = '$new_user' WHERE id = {$board['id']}");
+        cycleIfComplete($conn, $board['id'], $start_username);
+        return true;
+    }
+    
+    // 2. Hanapin kung saan nakaupo si start_username sa board ng kanyang sponsor
+    $parent_board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE (slot1 = '$start_username' OR slot2 = '$start_username') AND status = 'ACTIVE'"));
+    if ($parent_board) {
+        $is_slot1 = ($parent_board['slot1'] == $start_username);
+        if ($is_slot1) {
+            if (empty($parent_board['slot3'])) {
+                mysqli_query($conn, "UPDATE matrix_boards SET slot3 = '$new_user' WHERE id = {$parent_board['id']}");
+                cycleIfComplete($conn, $parent_board['id'], $parent_board['leader_username']);
+                return true;
+            }
+            if (empty($parent_board['slot4'])) {
+                mysqli_query($conn, "UPDATE matrix_boards SET slot4 = '$new_user' WHERE id = {$parent_board['id']}");
+                cycleIfComplete($conn, $parent_board['id'], $parent_board['leader_username']);
+                return true;
+            }
+        } else {
+            if (empty($parent_board['slot5'])) {
+                mysqli_query($conn, "UPDATE matrix_boards SET slot5 = '$new_user' WHERE id = {$parent_board['id']}");
+                cycleIfComplete($conn, $parent_board['id'], $parent_board['leader_username']);
+                return true;
+            }
+            if (empty($parent_board['slot6'])) {
+                mysqli_query($conn, "UPDATE matrix_boards SET slot6 = '$new_user' WHERE id = {$parent_board['id']}");
+                cycleIfComplete($conn, $parent_board['id'], $parent_board['leader_username']);
+                return true;
+            }
+        }
+        // Kung puno na ang parent board, umakyat sa mas mataas
+        $sponsor_of_parent = mysqli_fetch_assoc(mysqli_query($conn, "SELECT sponsor FROM users WHERE username = '{$parent_board['leader_username']}'"));
+        if ($sponsor_of_parent && !empty($sponsor_of_parent['sponsor'])) {
+            return findAndPlace($conn, $sponsor_of_parent['sponsor'], $new_user, $depth + 1);
+        }
+    }
+    
     return false;
 }
 
@@ -43,34 +102,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             mysqli_query($conn, "INSERT INTO users (username, password, sponsor) VALUES ('$new_user', '$password', '$sponsor')");
             mysqli_query($conn, "INSERT INTO matrix_boards (leader_username, status) VALUES ('$new_user', 'ACTIVE')");
             
-            // ========== PLACEMENT LOGIC ==========
-            $sponsor_board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE leader_username = '$sponsor' AND status = 'ACTIVE'"));
+            // ========== SPILLOVER PLACEMENT LOGIC ==========
+            $placed = findAndPlace($conn, $sponsor, $new_user);
             
-            if ($sponsor_board) {
-                if (empty($sponsor_board['slot1'])) {
-                    mysqli_query($conn, "UPDATE matrix_boards SET slot1 = '$new_user' WHERE id = {$sponsor_board['id']}");
-                } elseif (empty($sponsor_board['slot2'])) {
-                    mysqli_query($conn, "UPDATE matrix_boards SET slot2 = '$new_user' WHERE id = {$sponsor_board['id']}");
-                } else {
-                    // Try level-2 slots (spillover to upline)
-                    $uplink_board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE (slot1 = '$sponsor' OR slot2 = '$sponsor') AND status = 'ACTIVE'"));
-                    if ($uplink_board) {
-                        $is_slot1 = ($uplink_board['slot1'] == $sponsor);
-                        if ($is_slot1) {
-                            if (empty($uplink_board['slot3'])) mysqli_query($conn, "UPDATE matrix_boards SET slot3 = '$new_user' WHERE id = {$uplink_board['id']}");
-                            elseif (empty($uplink_board['slot4'])) mysqli_query($conn, "UPDATE matrix_boards SET slot4 = '$new_user' WHERE id = {$uplink_board['id']}");
-                        } else {
-                            if (empty($uplink_board['slot5'])) mysqli_query($conn, "UPDATE matrix_boards SET slot5 = '$new_user' WHERE id = {$uplink_board['id']}");
-                            elseif (empty($uplink_board['slot6'])) mysqli_query($conn, "UPDATE matrix_boards SET slot6 = '$new_user' WHERE id = {$uplink_board['id']}");
-                        }
+            if (!$placed) {
+                // Fallback: kung walang nahanap, ilagay sa mismong sponsor
+                $sponsor_board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE leader_username = '$sponsor' AND status = 'ACTIVE'"));
+                if ($sponsor_board) {
+                    if (empty($sponsor_board['slot1'])) {
+                        mysqli_query($conn, "UPDATE matrix_boards SET slot1 = '$new_user' WHERE id = {$sponsor_board['id']}");
+                    } elseif (empty($sponsor_board['slot2'])) {
+                        mysqli_query($conn, "UPDATE matrix_boards SET slot2 = '$new_user' WHERE id = {$sponsor_board['id']}");
                     }
                 }
-            }
-            
-            // Check if sponsor's board is now complete
-            $updated_board = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM matrix_boards WHERE leader_username = '$sponsor' AND status = 'ACTIVE'"));
-            if ($updated_board) {
-                cycleIfComplete($conn, $updated_board['id'], $sponsor);
             }
             
             $success = "Member $new_user registered successfully with code: $reg_code!";
