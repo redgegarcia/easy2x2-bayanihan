@@ -33,9 +33,16 @@ function countLeg($conn, $username) {
 $left_count = !empty($l1_1) ? 1 + countLeg($conn, $l1_1) : 0;
 $right_count = !empty($l1_2) ? 1 + countLeg($conn, $l1_2) : 0;
 $pairs = min($left_count, $right_count);
-$bonus = $pairs * 500;
+$pairing_bonus = $pairs * 500;
 
-$filled_count = (!empty($l1_1) ? 1 : 0) + (!empty($l1_2) ? 1 : 0);
+// Compute direct commissions (₱250 per direct member)
+$direct_count = (!empty($l1_1) ? 1 : 0) + (!empty($l1_2) ? 1 : 0);
+$direct_commission = $direct_count * 250;
+
+// GROSS INCOME = Direct Commission + Pairing Bonus
+$gross_income = $direct_commission + $pairing_bonus;
+
+$filled_count = $direct_count;
 $is_l1_complete = (!empty($l1_1) && !empty($l1_2));
 ?>
 <!DOCTYPE html>
@@ -133,7 +140,6 @@ $is_l1_complete = (!empty($l1_1) && !empty($l1_2));
         .user-role { font-size: 0.7rem; color: var(--gray-500); font-weight: 600; }
         .status-badge { background: #d1fae5; color: #065f46; font-size: 0.7rem; font-weight: 700; padding: 4px 10px; border-radius: 20px; }
 
-        /* Minimalist progress text - walang box */
         .progress-text {
             text-align: center;
             font-size: 0.75rem;
@@ -143,7 +149,6 @@ $is_l1_complete = (!empty($l1_1) && !empty($l1_2));
             padding: 0 8px;
         }
 
-        /* MATRIX BOXES - Mas malaki, mas prominent */
         .pyramid-container { 
             display: flex; 
             flex-direction: column; 
@@ -176,7 +181,6 @@ $is_l1_complete = (!empty($l1_1) && !empty($l1_2));
         .filled-l1 .slot-name { color: #1e1b4b; }
         .empty .slot-name { color: var(--gray-400); font-weight: 500; font-size: 0.7rem; }
 
-        /* COUNTERS - Mas maliit, simple, walang dominanteng box */
         .counters-row {
             display: flex;
             justify-content: center;
@@ -203,31 +207,54 @@ $is_l1_complete = (!empty($l1_1) && !empty($l1_2));
 
         .pairs-badge {
             text-align: center;
-            font-size: 0.9rem;
+            font-size: 0.75rem;
             font-weight: 600;
             color: #92400e;
             background: #fef3c7;
             display: inline-block;
             width: auto;
             margin: 0 auto 12px;
-            padding: 8px 16px;
+            padding: 6px 14px;
             border-radius: 30px;
         }
 
-        .payout-card { background: linear-gradient(135deg, #fef3c7, #fde68a); border: 2px solid #fbbf24; border-radius: 16px; padding: 16px; margin-top: 8px; text-align: center; box-shadow: var(--shadow-md); }
-        .payout-card.completed { background: linear-gradient(135deg, #d1fae5, #a7f3d0); border-color: #34d399; }
-        .payout-amount { font-size: 2rem; font-weight: 800; color: #92400e; line-height: 1; margin-bottom: 4px; }
-        .completed .payout-amount { color: #065f46; }
-        .payout-label { font-size: 0.7rem; color: #92400e; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
-        .payout-status { font-size: 0.65rem; color: #92400e; margin-top: 4px; }
+        .gross-card {
+            background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+            border: 2px solid #34d399;
+            border-radius: 16px;
+            padding: 16px;
+            margin-top: 8px;
+            text-align: center;
+            box-shadow: var(--shadow-md);
+        }
+        .gross-amount {
+            font-size: 2rem;
+            font-weight: 800;
+            color: #065f46;
+            line-height: 1;
+            margin-bottom: 4px;
+        }
+        .gross-label {
+            font-size: 0.7rem;
+            color: #065f46;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .gross-breakdown {
+            font-size: 0.6rem;
+            color: #065f46;
+            margin-top: 6px;
+            opacity: 0.8;
+        }
 
         .action-area { margin-top: 16px; }
         .encode-link-btn {
             display: flex; align-items: center; justify-content: center; gap: 8px;
             background: linear-gradient(135deg, var(--success) 0%, var(--success-dark) 100%);
             color: white; text-decoration: none; font-size: 0.9rem; font-weight: 700;
-            padding: 14px; border-radius: 14px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
-            transition: all 0.2s ease; border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 14px; border-radius: 14px;
+            transition: all 0.2s ease;
         }
         .encode-link-btn:active { transform: scale(0.98); opacity: 0.9; }
 
@@ -259,7 +286,6 @@ $is_l1_complete = (!empty($l1_1) && !empty($l1_2));
                 <div class="status-badge">● Active</div>
             </div>
 
-            <!-- Minimalist text - walang box, walang progress bar -->
             <div class="progress-text">
                 <?php 
                 if ($filled_count == 0) {
@@ -272,7 +298,6 @@ $is_l1_complete = (!empty($l1_1) && !empty($l1_2));
                 ?>
             </div>
 
-            <!-- MATRIX (mas malaki ang boxes) -->
             <div class="pyramid-container">
                 <div class="pyramid-row">
                     <div class="matrix-slot slot-top filled-owner">
@@ -296,7 +321,6 @@ $is_l1_complete = (!empty($l1_1) && !empty($l1_2));
                 </div>
             </div>
 
-            <!-- COUNTERS (maliit, simple, hindi naka-box) -->
             <div class="counters-row">
                 <div class="counter-item left">
                     <div class="counter-label">L COUNT</div>
@@ -308,38 +332,52 @@ $is_l1_complete = (!empty($l1_1) && !empty($l1_2));
                 </div>
             </div>
 
-            <!-- Pairs indicator -->
             <div style="text-align: center;">
                 <div class="pairs-badge">
-                    🎯 <?php echo $pairs; ?> pair(s) = ₱<?php echo number_format($bonus); ?>
+                    🎯 <?php echo $pairs; ?> pair(s) = ₱<?php echo number_format($pairing_bonus); ?>
                 </div>
             </div>
 
-            <!-- Payout Card (yellow) -->
-            <div class="payout-card <?php echo ($pairs > 0) ? 'completed' : ''; ?>">
-                <div class="payout-label">Pairing Bonus</div>
-                <div class="payout-amount">₱<?php echo number_format($bonus); ?></div>
-                <div class="payout-status">₱500 bawat pair (LEFT + RIGHT)</div>
+            <!-- GROSS INCOME CARD (replaces old pairing bonus card) -->
+            <div class="gross-card">
+                <div class="gross-label">💰 GROSS INCOME</div>
+                <div class="gross-amount">₱<?php echo number_format($gross_income); ?></div>
+                <div class="gross-breakdown">
+                    ₱<?php echo number_format($direct_commission); ?> from directs (₱250/ea) + ₱<?php echo number_format($pairing_bonus); ?> from pairs (₱500/pair)
+                </div>
             </div>
 
-            <div class="action-area">
-                <a href="register_member.php" class="encode-link-btn">
-                    <span>➕ Register New Member</span>
-                </a>
-                
-                <div style="display: flex; gap: 10px; margin-top: 12px;">
-                    <a href="history.php" style="flex: 1; text-align: center; color: #64748b; font-size: 0.75rem; text-decoration: none; font-weight: 600; padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc;">
-                        📜 Cycle
-                    </a>
-                    <a href="payout_history.php" style="flex: 1; text-align: center; color: #64748b; font-size: 0.75rem; text-decoration: none; font-weight: 600; padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc;">
-                        💰 Payout
-                    </a>
-					<a href="downline.php" style="flex: 1; text-align: center; color: #64748b; font-size: 0.75rem; text-decoration: none; font-weight: 600; padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc;">
-						🌳 Downline
+			<div class="action-area">
+				<a href="register_member.php" class="encode-link-btn">
+					<span>➕ Register New Member</span>
+				</a>
+				
+				<div style="display: flex; gap: 10px; margin-top: 12px;">
+					<a href="history.php" style="flex: 1; text-align: center; color: #64748b; font-size: 0.75rem; text-decoration: none; font-weight: 600; padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc;">
+						📜 Cycle History
 					</a>
-                </div>
-            </div>
-        </div>
+					<a href="payout_history.php" style="flex: 1; text-align: center; color: #64748b; font-size: 0.75rem; text-decoration: none; font-weight: 600; padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc;">
+						💰 Payout History
+					</a>
+				</div>
+				
+				<!-- VIEW DOWNLINE BUTTON -->
+				<div style="margin-top: 8px;">
+					<a href="downline.php" style="display: block; text-align: center; color: #2563eb; font-size: 0.75rem; text-decoration: none; font-weight: 600; padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc;">
+						🌳 View Downline Tree
+					</a>
+				</div>
+				
+				<!-- ADMIN LINKS - IISA NA LANG -->
+				<?php if ($current_user == 'admin'): ?>
+					<div style="margin-top: 12px;">
+						<a href="admin_payouts.php" style="display: block; text-align: center; color: #2563eb; font-size: 0.75rem; text-decoration: none; font-weight: 600; padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc;">
+							🔧 Admin Panel
+						</a>
+					</div>
+				<?php endif; ?>
+			</div>        
+		</div>
 
         <div class="app-footer">
             © 2026 Easy 2x2 Bayanihan Program

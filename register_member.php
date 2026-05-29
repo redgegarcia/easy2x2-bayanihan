@@ -31,20 +31,26 @@ function recordPairingBonus($conn, $username) {
     $right_count = countTotalInLeg($conn, $right);
     $current_pairs = min($left_count, $right_count);
     
-    $existing_query = mysqli_query($conn, "SELECT COUNT(*) as total FROM cycles WHERE username = '$username'");
+    // Kunin ang existing PAIRING bonuses lang (500) hindi kasama ang direct commissions
+    $existing_query = mysqli_query($conn, "SELECT COUNT(*) as total FROM cycles WHERE username = '$username' AND reward_amount = 500");
     $existing_row = mysqli_fetch_assoc($existing_query);
     $existing_pairs = (int)$existing_row['total'];
     
     $new_pairs = $current_pairs - $existing_pairs;
     
-    for ($i = 0; $i < $new_pairs; $i++) {
-        mysqli_query($conn, "INSERT INTO cycles (username, reward_amount) VALUES ('$username', 500)");
-    }
+	for ($i = 0; $i < $new_pairs; $i++) {
+		mysqli_query($conn, "INSERT INTO cycles (username, reward_amount, status) VALUES ('$username', 500, 'PENDING')");
+	}
     
     return $new_pairs;
 }
 
-// Function: Hanapin ang pinakamalalim na bakanteng slot sa napiling side
+// Helper: Mag-record ng direct commission (₱250)
+function recordDirectCommission($conn, $username) {
+    mysqli_query($conn, "INSERT INTO cycles (username, reward_amount, status) VALUES ('$username', 250, 'PENDING')");
+}
+
+// Function: Hanapin ang pinakamalalim na bakanteng slot
 function findDeepestVacant($conn, $root_user, $target_side, $depth = 0) {
     if ($depth > 50) return null;
     
@@ -67,14 +73,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $position = mysqli_real_escape_string($conn, $_POST['position']);
     $reg_code = mysqli_real_escape_string($conn, strtoupper(trim($_POST['code'])));
     
-    // ===== CODE VALIDATION =====
+    // CODE VALIDATION
     $code_check = mysqli_query($conn, "SELECT * FROM codes WHERE code = '$reg_code' AND is_used = 0");
     $code_row = mysqli_fetch_assoc($code_check);
     
     if (!$code_row) {
-        $error = "Invalid or already used registration code! Please purchase a valid code.";
+        $error = "Invalid or already used registration code!";
     } else {
-        // Check kung existing na ang username o email
         $check_user = mysqli_query($conn, "SELECT id FROM users WHERE username = '$new_user' OR email = '$email'");
         if (mysqli_num_rows($check_user) > 0) {
             $error = "Username or email already exists!";
@@ -82,10 +87,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             // Mark code as used
             mysqli_query($conn, "UPDATE codes SET is_used = 1, used_by = '$new_user', used_at = NOW() WHERE code = '$reg_code'");
             
-            // ===== ITO ANG HINIHINGI MO - INSERT STATEMENT =====
+            // Create new user
             mysqli_query($conn, "INSERT INTO users (username, email, sponsor) VALUES ('$new_user', '$email', '$sponsor')");
-            
-            // Create new user's matrix board
             mysqli_query($conn, "INSERT INTO matrix_boards (leader_username, status) VALUES ('$new_user', 'ACTIVE')");
             
             // Hanapin kung saan ilalagay
@@ -94,10 +97,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             if ($placement) {
                 mysqli_query($conn, "UPDATE matrix_boards SET {$placement['slot']} = '$new_user' WHERE leader_username = '{$placement['user']}'");
                 
-                // Mag-record ng pairing bonus
+                // ===== DIRECT COMMISSION: ₱250 para sa sponsor =====
+                recordDirectCommission($conn, $sponsor);
+                
+                // ===== PAIRING BONUS: para sa direct placement user =====
                 $direct_placement_user = $placement['user'];
                 recordPairingBonus($conn, $direct_placement_user);
                 
+                // Kung magkaiba ang sponsor at direct placement user, i-record din para sa sponsor
                 if ($sponsor != $direct_placement_user) {
                     recordPairingBonus($conn, $sponsor);
                 }
@@ -133,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             width: 100%;
             background: white;
             border-radius: 32px;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
             overflow: hidden;
         }
         .card-header {
